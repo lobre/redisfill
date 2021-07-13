@@ -21,6 +21,7 @@ type config struct {
 	port    string
 	pass    string
 	db      int
+	mode    string
 	workers int
 	length  int
 	max     int
@@ -46,17 +47,33 @@ func run(ctx context.Context, config config) error {
 			if err != nil {
 				return err
 			}
-			if mem >= config.max*1000000 {
+			if config.max != 0 && mem >= config.max*1000000 {
 				return errors.New(fmt.Sprintf("Memory already above %d Mo, exiting", config.max))
 			}
-			for mem < config.max*1000000 {
-				key := fmt.Sprintf("%s%s", config.prefix, uuid.NewV4().String())
+			for config.max == 0 || mem < config.max*1000000 {
+				switch config.mode {
+				case "get":
+					key := "test"
 
-				// insert random data
-				fmt.Printf("worker %d: inserting data...\n", id)
-				err = client.Set(ctx, key, val, 0).Err()
-				if err != nil {
-					return err
+					// insert random data
+					fmt.Printf("worker %d: getting data...\n", id)
+					err = client.Get(ctx, key).Err()
+					if err != nil && err != redis.Nil { // ignoring when key does not exist
+						return err
+					}
+
+				case "set":
+					key := fmt.Sprintf("%s%s", config.prefix, uuid.NewV4().String())
+
+					// insert random data
+					fmt.Printf("worker %d: inserting data...\n", id)
+					err = client.Set(ctx, key, val, 0).Err()
+					if err != nil {
+						return err
+					}
+
+				default:
+					return errors.New(fmt.Sprintf("Unrecognized mode %s, exiting", config.mode))
 				}
 
 				// recalculate memory usage
@@ -65,6 +82,7 @@ func run(ctx context.Context, config config) error {
 					return err
 				}
 			}
+
 			return nil
 		})
 	}
@@ -83,9 +101,10 @@ func main() {
 	flag.StringVar(&config.port, "port", "6379", "Redis port")
 	flag.StringVar(&config.pass, "pass", "", "Redis password")
 	flag.IntVar(&config.db, "db", 0, "Redis database number")
+	flag.StringVar(&config.mode, "mode", "get", "Whether to run get or set commands")
 	flag.IntVar(&config.workers, "workers", 100, "Number of parallel workers")
 	flag.IntVar(&config.length, "length", 50000, "Length of generated values")
-	flag.IntVar(&config.max, "max", 1000, "Max memory in Mo")
+	flag.IntVar(&config.max, "max", 0, "Max memory in Mo (0 for unlimited)")
 	flag.StringVar(&config.prefix, "prefix", "", "Prefix to append to keys")
 	flag.Parse()
 
